@@ -1770,10 +1770,6 @@ function scaleByPixelRatio (input) {
     return Math.floor(input * pixelRatio);
 }
 
-function lerp (a, b, t) {
-    return a + (b - a) * t;
-}
-
 function hashCode (s) {
     if (s.length === 0) return 0;
     let hash = 0;

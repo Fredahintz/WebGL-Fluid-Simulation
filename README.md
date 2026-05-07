@@ -14,8 +14,6 @@ https://github.com/haxiomic/GPU-Fluid-Experiments
 
 ## Fullscreen Autoplay Mode
 
-### Fullscreen autoplay mode
-
 - Open with `?autoplay=1` (or `?present=1`) to run in presentation mode and hide dat.GUI:
   - Example: `https://paveldogreat.github.io/WebGL-Fluid-Simulation/?autoplay=1`
 - On desktop, first interaction requests browser fullscreen.
