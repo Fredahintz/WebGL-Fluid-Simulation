@@ -1385,8 +1385,7 @@ function updateKeywords () {
 
 updateKeywords();
 initFramebuffers();
-if (!presentationMode)
-    multipleSplats(parseInt(Math.random() * 20) + 5);
+multipleSplats(parseInt(Math.random() * 20) + 5);
 
 let lastUpdateTime = Date.now();
 let colorUpdateTimer = 0.0;
@@ -1736,10 +1735,7 @@ function splatPointer (pointer) {
 
 function multipleSplats (amount) {
     for (let i = 0; i < amount; i++) {
-        const color = generateColor();
-        color.r *= 10.0;
-        color.g *= 10.0;
-        color.b *= 10.0;
+        const color = generateBrightColor();
         const x = Math.random();
         const y = Math.random();
         const dx = 1000 * (Math.random() - 0.5);
@@ -1778,6 +1774,7 @@ canvas.addEventListener('mousedown', e => {
     if (pointer == null)
         pointer = new pointerPrototype();
     updatePointerDownData(pointer, -1, posX, posY);
+    splat(pointer.texcoordX, pointer.texcoordY, (Math.random() - 0.5) * config.SPLAT_FORCE, (Math.random() - 0.5) * config.SPLAT_FORCE, generateBrightColor());
 });
 
 canvas.addEventListener('mousemove', e => {
@@ -1801,6 +1798,7 @@ canvas.addEventListener('touchstart', e => {
         let posX = scaleByPixelRatio(touches[i].pageX);
         let posY = scaleByPixelRatio(touches[i].pageY);
         updatePointerDownData(pointers[i + 1], touches[i].identifier, posX, posY);
+        splat(pointers[i + 1].texcoordX, pointers[i + 1].texcoordY, (Math.random() - 0.5) * config.SPLAT_FORCE, (Math.random() - 0.5) * config.SPLAT_FORCE, generateBrightColor());
     }
 });
 
@@ -1879,6 +1877,14 @@ function generateColor () {
     c.r *= 0.15;
     c.g *= 0.15;
     c.b *= 0.15;
+    return c;
+}
+
+function generateBrightColor () {
+    let c = generateColor();
+    c.r *= 10.0;
+    c.g *= 10.0;
+    c.b *= 10.0;
     return c;
 }
 
