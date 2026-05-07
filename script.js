@@ -82,6 +82,7 @@ let config = {
     SUNRAYS: true,
     SUNRAYS_RESOLUTION: 196,
     SUNRAYS_WEIGHT: 1.0,
+    AUTO_POINTER: true,
 }
 
 function pointerPrototype () {
@@ -221,6 +222,8 @@ function startGUI () {
     gui.add({ fun: () => {
         splatStack.push(parseInt(Math.random() * 20) + 5);
     } }, 'fun').name('Random splats');
+
+    gui.add(config, 'AUTO_POINTER').name('auto pointer');
 
     let bloomFolder = gui.addFolder('Bloom');
     bloomFolder.add(config, 'BLOOM').name('enabled').onFinishChange(updateKeywords);
@@ -1171,6 +1174,18 @@ multipleSplats(parseInt(Math.random() * 20) + 5);
 
 let lastUpdateTime = Date.now();
 let colorUpdateTimer = 0.0;
+
+let autoPointerTime = 0.0;
+let autoPointerFreqDriftTimer = 0.0;
+let autoPointerFreqX = 1.0;
+let autoPointerFreqY = Math.PI; // initial irrational ratio to freqX for a non-repeating start
+let autoPointerObj = new pointerPrototype();
+autoPointerObj.down = true;
+autoPointerObj.texcoordX = 0.5;
+autoPointerObj.texcoordY = 0.5;
+autoPointerObj.prevTexcoordX = 0.5;
+autoPointerObj.prevTexcoordY = 0.5;
+autoPointerObj.color = generateColor();
 update();
 
 function update () {
@@ -1178,6 +1193,7 @@ function update () {
     if (resizeCanvas())
         initFramebuffers();
     updateColors(dt);
+    updateAutoPointer(dt);
     applyInputs();
     if (!config.PAUSED)
         step(dt);
@@ -1226,6 +1242,35 @@ function applyInputs () {
             splatPointer(p);
         }
     });
+}
+
+function updateAutoPointer (dt) {
+    if (!config.AUTO_POINTER) return;
+
+    autoPointerTime += dt;
+    autoPointerFreqDriftTimer += dt;
+
+    // Every 5 seconds, pick new random frequencies and a new color
+    if (autoPointerFreqDriftTimer >= 5.0) {
+        autoPointerFreqDriftTimer -= 5.0;
+        autoPointerFreqX = 0.5 + Math.random() * 2.0;
+        autoPointerFreqY = 0.5 + Math.random() * 2.0;
+        autoPointerObj.color = generateColor();
+    }
+
+    // Lissajous-style path covering most of the canvas
+    const newX = 0.5 + 0.45 * Math.sin(autoPointerTime * autoPointerFreqX);
+    const newY = 0.5 + 0.45 * Math.sin(autoPointerTime * autoPointerFreqY);
+
+    autoPointerObj.prevTexcoordX = autoPointerObj.texcoordX;
+    autoPointerObj.prevTexcoordY = autoPointerObj.texcoordY;
+    autoPointerObj.texcoordX = newX;
+    autoPointerObj.texcoordY = newY;
+    autoPointerObj.deltaX = correctDeltaX(newX - autoPointerObj.prevTexcoordX);
+    autoPointerObj.deltaY = correctDeltaY(newY - autoPointerObj.prevTexcoordY);
+
+    if (Math.abs(autoPointerObj.deltaX) > 0.0001 || Math.abs(autoPointerObj.deltaY) > 0.0001)
+        splatPointer(autoPointerObj);
 }
 
 function step (dt) {
