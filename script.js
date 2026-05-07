@@ -26,10 +26,17 @@ SOFTWARE.
 
 // Mobile promo section
 
+const urlParams = new URLSearchParams(window.location.search);
+const presentationMode = urlParams.get('autoplay') === '1' || urlParams.get('present') === '1';
+const desktopMode = !isMobile();
+
 const promoPopup = document.getElementsByClassName('promo')[0];
 const promoPopupClose = document.getElementsByClassName('promo-close')[0];
+const fullscreenPrompt = document.getElementById('fullscreen_prompt');
+const soundIndicator = document.getElementById('sound_indicator');
+const soundBars = Array.from(document.querySelectorAll('.sound-bar'));
 
-if (isMobile()) {
+if (isMobile() && !presentationMode) {
     setTimeout(() => {
         promoPopup.style.display = 'table';
     }, 20000);
@@ -82,6 +89,9 @@ let config = {
     SUNRAYS: true,
     SUNRAYS_RESOLUTION: 196,
     SUNRAYS_WEIGHT: 1.0,
+    AUDIO_ENABLED: false,
+    BEAT_SENSITIVITY: 1.4,
+    AUDIO_SPLAT_COUNT: 2,
 }
 
 function pointerPrototype () {
@@ -113,7 +123,30 @@ if (!ext.supportLinearFiltering) {
     config.SUNRAYS = false;
 }
 
-startGUI();
+const baseAudioReactiveSettings = {
+    SPLAT_FORCE: config.SPLAT_FORCE,
+    CURL: config.CURL,
+    COLOR_UPDATE_SPEED: config.COLOR_UPDATE_SPEED
+};
+
+let audioContext = null;
+let audioAnalyser = null;
+let audioSource = null;
+let audioStream = null;
+let audioFrequencyData = null;
+let audioTimeData = null;
+let audioEnergyHistory = new Array(43).fill(0);
+let audioEnergyHistoryIndex = 0;
+let audioLastBeatTime = 0;
+let audioRMSAverage = 0;
+let ambientSplatTimer = 0;
+let ambientSplatDelay = 0.25;
+
+const gui = startGUI();
+if (presentationMode && gui && typeof gui.hide === 'function')
+    gui.hide();
+
+setupFullscreenControls();
 
 function getWebGLContext (canvas) {
     const params = { alpha: true, depth: false, stencil: false, antialias: false, preserveDrawingBuffer: false };
@@ -206,7 +239,7 @@ function supportRenderTextureFormat (gl, internalFormat, format, type) {
 }
 
 function startGUI () {
-    var gui = new dat.GUI({ width: 300 });
+    let gui = new dat.GUI({ width: 300 });
     gui.add(config, 'DYE_RESOLUTION', { 'high': 1024, 'medium': 512, 'low': 256, 'very low': 128 }).name('quality').onFinishChange(initFramebuffers);
     gui.add(config, 'SIM_RESOLUTION', { '32': 32, '64': 64, '128': 128, '256': 256 }).name('sim resolution').onFinishChange(initFramebuffers);
     gui.add(config, 'DENSITY_DISSIPATION', 0, 4.0).name('density diffusion');
@@ -235,6 +268,18 @@ function startGUI () {
     captureFolder.addColor(config, 'BACK_COLOR').name('background color');
     captureFolder.add(config, 'TRANSPARENT').name('transparent');
     captureFolder.add({ fun: captureScreenshot }, 'fun').name('take screenshot');
+
+    let soundFolder = gui.addFolder('Sound');
+    soundFolder.add(config, 'AUDIO_ENABLED').name('audio enabled').listen().onFinishChange(value => {
+        if (value)
+            enableMicrophoneAudio();
+        else
+            disableAudioCapture();
+    });
+    soundFolder.add(config, 'BEAT_SENSITIVITY', 0.5, 3.0).name('beat sensitivity');
+    soundFolder.add(config, 'AUDIO_SPLAT_COUNT', 1, 5).step(1).name('splats per beat');
+    soundFolder.add({ fun: enableMicrophoneAudio }, 'fun').name('Enable Sound');
+    soundFolder.add({ fun: enableSystemAudio }, 'fun').name('System Audio');
 
     let github = gui.add({ fun : () => {
         window.open('https://github.com/PavelDoGreat/WebGL-Fluid-Simulation');
@@ -278,10 +323,141 @@ function startGUI () {
 
     if (isMobile())
         gui.close();
+
+    return gui;
 }
 
 function isMobile () {
     return /Mobi|Android/i.test(navigator.userAgent);
+}
+
+function setupFullscreenControls () {
+    if (!desktopMode || !fullscreenPrompt) return;
+
+    if (!presentationMode)
+        fullscreenPrompt.classList.add('visible');
+
+    const firstInteractionHandler = () => {
+        requestFullscreenSafe();
+        if (!presentationMode)
+            fullscreenPrompt.classList.remove('visible');
+    };
+
+    window.addEventListener('pointerdown', firstInteractionHandler, { once: true });
+    fullscreenPrompt.addEventListener('click', requestFullscreenSafe);
+
+    document.addEventListener('fullscreenchange', () => {
+        if (presentationMode) return;
+        if (document.fullscreenElement)
+            fullscreenPrompt.classList.remove('visible');
+        else
+            fullscreenPrompt.classList.add('visible');
+    });
+}
+
+function requestFullscreenSafe () {
+    if (!desktopMode || document.fullscreenElement) return;
+    if (!document.documentElement.requestFullscreen) return;
+    document.documentElement.requestFullscreen().catch(() => {});
+}
+
+function toggleFullscreen () {
+    if (!desktopMode) return;
+    if (!document.fullscreenElement) {
+        requestFullscreenSafe();
+        return;
+    }
+    if (document.exitFullscreen)
+        document.exitFullscreen().catch(() => {});
+}
+
+async function enableMicrophoneAudio () {
+    await enableAudioFromStream(async () => {
+        return await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    });
+}
+
+async function enableSystemAudio () {
+    await enableAudioFromStream(async () => {
+        return await navigator.mediaDevices.getDisplayMedia({ audio: true, video: false });
+    });
+}
+
+async function enableAudioFromStream (streamFactory) {
+    if (!navigator.mediaDevices) {
+        config.AUDIO_ENABLED = false;
+        return;
+    }
+
+    try {
+        const stream = await streamFactory();
+        initializeAudioPipeline(stream);
+        config.AUDIO_ENABLED = true;
+    } catch (e) {
+        console.error('Audio capture failed:', e);
+        config.AUDIO_ENABLED = false;
+        updateSoundIndicator(0, false);
+    }
+}
+
+function initializeAudioPipeline (stream) {
+    disableAudioCapture();
+    audioStream = stream;
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+        config.AUDIO_ENABLED = false;
+        return;
+    }
+
+    if (audioContext == null)
+        audioContext = new AudioContextClass();
+    if (audioContext.state === 'suspended')
+        audioContext.resume();
+
+    audioAnalyser = audioContext.createAnalyser();
+    audioAnalyser.fftSize = 512;
+    audioAnalyser.smoothingTimeConstant = 0.75;
+    audioSource = audioContext.createMediaStreamSource(stream);
+    audioSource.connect(audioAnalyser);
+
+    audioFrequencyData = new Uint8Array(audioAnalyser.frequencyBinCount);
+    audioTimeData = new Uint8Array(audioAnalyser.fftSize);
+    audioEnergyHistory.fill(0);
+    audioEnergyHistoryIndex = 0;
+    audioLastBeatTime = 0;
+    audioRMSAverage = 0;
+
+    stream.getAudioTracks().forEach(track => {
+        track.addEventListener('ended', () => {
+            config.AUDIO_ENABLED = false;
+            updateSoundIndicator(0, false);
+        });
+    });
+}
+
+function disableAudioCapture () {
+    if (audioSource != null) {
+        audioSource.disconnect();
+        audioSource = null;
+    }
+    if (audioStream != null) {
+        audioStream.getTracks().forEach(track => track.stop());
+        audioStream = null;
+    }
+    audioAnalyser = null;
+    audioFrequencyData = null;
+    audioTimeData = null;
+    updateSoundIndicator(0, false);
+}
+
+function updateSoundIndicator (level, isActive) {
+    if (!soundIndicator || soundBars.length === 0) return;
+    soundIndicator.classList.toggle('active', isActive);
+    const activeBars = Math.ceil(clamp01(level) * soundBars.length);
+    soundBars.forEach((bar, index) => {
+        bar.classList.toggle('on', index < activeBars);
+        bar.style.height = `${6 + clamp01(level) * (18 - index * 2)}px`;
+    });
 }
 
 function captureScreenshot () {
@@ -1167,7 +1343,6 @@ function updateKeywords () {
 
 updateKeywords();
 initFramebuffers();
-multipleSplats(parseInt(Math.random() * 20) + 5);
 
 let lastUpdateTime = Date.now();
 let colorUpdateTimer = 0.0;
@@ -1177,12 +1352,96 @@ function update () {
     const dt = calcDeltaTime();
     if (resizeCanvas())
         initFramebuffers();
+    updateAudioReactiveState(dt);
     updateColors(dt);
     applyInputs();
     if (!config.PAUSED)
         step(dt);
     render(null);
     requestAnimationFrame(update);
+}
+
+function updateAudioReactiveState (dt) {
+    let quietFrame = true;
+
+    if (config.AUDIO_ENABLED && audioAnalyser && audioFrequencyData && audioTimeData && audioContext) {
+        audioAnalyser.getByteFrequencyData(audioFrequencyData);
+        audioAnalyser.getByteTimeDomainData(audioTimeData);
+
+        const rms = calculateRMS(audioTimeData);
+        audioRMSAverage = audioRMSAverage * 0.95 + rms * 0.05;
+        const subBassEnergy = getFrequencyBandEnergy(0, 60);
+        const bassEnergy = getFrequencyBandEnergy(60, 250);
+        const midEnergy = getFrequencyBandEnergy(250, 2000);
+        const trebleEnergy = getFrequencyBandEnergy(2000, audioContext.sampleRate / 2);
+        const lowEnergy = (subBassEnergy + bassEnergy) * 0.5;
+
+        const averageEnergy = getAverageEnergyHistory();
+        const now = performance.now();
+        const beatDetected = lowEnergy > averageEnergy * config.BEAT_SENSITIVITY && now - audioLastBeatTime > 200;
+
+        audioEnergyHistory[audioEnergyHistoryIndex] = lowEnergy;
+        audioEnergyHistoryIndex = (audioEnergyHistoryIndex + 1) % audioEnergyHistory.length;
+
+        if (beatDetected) {
+            splatStack.push(config.AUDIO_SPLAT_COUNT);
+            audioLastBeatTime = now;
+        }
+
+        config.SPLAT_FORCE = lerp(config.SPLAT_FORCE, 4000 + lowEnergy * 8000, 0.1);
+        config.CURL = lerp(config.CURL, 15 + midEnergy * 35, 0.1);
+        config.COLOR_UPDATE_SPEED = lerp(config.COLOR_UPDATE_SPEED, 4 + trebleEnergy * 16, 0.1);
+        quietFrame = rms < Math.max(audioRMSAverage * 1.1, 0.03);
+        updateSoundIndicator(clamp01(rms * 2.5), true);
+    } else {
+        config.SPLAT_FORCE = lerp(config.SPLAT_FORCE, baseAudioReactiveSettings.SPLAT_FORCE, 0.05);
+        config.CURL = lerp(config.CURL, baseAudioReactiveSettings.CURL, 0.05);
+        config.COLOR_UPDATE_SPEED = lerp(config.COLOR_UPDATE_SPEED, baseAudioReactiveSettings.COLOR_UPDATE_SPEED, 0.05);
+        updateSoundIndicator(0, false);
+    }
+
+    updateAmbientSplats(dt, quietFrame);
+}
+
+function updateAmbientSplats (dt, isQuiet) {
+    if (!isQuiet) {
+        ambientSplatTimer = 0;
+        return;
+    }
+    ambientSplatTimer += dt;
+    if (ambientSplatTimer >= ambientSplatDelay) {
+        splatStack.push(1);
+        ambientSplatTimer = 0;
+        ambientSplatDelay = 2 + Math.random() * 2;
+    }
+}
+
+function calculateRMS (buffer) {
+    let sum = 0;
+    for (let i = 0; i < buffer.length; i++) {
+        const sample = (buffer[i] - 128) / 128;
+        sum += sample * sample;
+    }
+    return Math.sqrt(sum / buffer.length);
+}
+
+function getFrequencyBandEnergy (minHz, maxHz) {
+    if (!audioContext || !audioFrequencyData) return 0;
+    const nyquist = audioContext.sampleRate / 2;
+    const minIndex = Math.max(0, Math.floor(minHz / nyquist * audioFrequencyData.length));
+    const maxIndex = Math.min(audioFrequencyData.length - 1, Math.ceil(maxHz / nyquist * audioFrequencyData.length));
+    if (maxIndex <= minIndex) return 0;
+    let sum = 0;
+    for (let i = minIndex; i <= maxIndex; i++)
+        sum += audioFrequencyData[i];
+    return (sum / (maxIndex - minIndex + 1)) / 255;
+}
+
+function getAverageEnergyHistory () {
+    let sum = 0;
+    for (let i = 0; i < audioEnergyHistory.length; i++)
+        sum += audioEnergyHistory[i];
+    return sum / audioEnergyHistory.length + 0.0001;
 }
 
 function calcDeltaTime () {
@@ -1517,6 +1776,8 @@ window.addEventListener('touchend', e => {
 });
 
 window.addEventListener('keydown', e => {
+    if (e.code === 'KeyF')
+        toggleFullscreen();
     if (e.code === 'KeyP')
         config.PAUSED = !config.PAUSED;
     if (e.key === ' ')
@@ -1633,6 +1894,10 @@ function getTextureScale (texture, width, height) {
 function scaleByPixelRatio (input) {
     let pixelRatio = window.devicePixelRatio || 1;
     return Math.floor(input * pixelRatio);
+}
+
+function lerp (a, b, t) {
+    return a + (b - a) * t;
 }
 
 function hashCode (s) {

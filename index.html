@@ -186,6 +186,57 @@
                     opacity: 1;
                 }
             }
+
+            .fullscreen-prompt {
+                display: none;
+                position: absolute;
+                inset: 0;
+                z-index: 5;
+                align-items: center;
+                justify-content: center;
+                background: rgba(0, 0, 0, 0.35);
+                color: #E6F7FF;
+                font-family: Arial, sans-serif;
+                font-size: 1.1rem;
+                letter-spacing: 0.05em;
+                text-transform: uppercase;
+                cursor: pointer;
+            }
+
+            .fullscreen-prompt.visible {
+                display: flex;
+            }
+
+            .sound-indicator {
+                position: absolute;
+                right: 16px;
+                bottom: 16px;
+                z-index: 4;
+                display: none;
+                align-items: end;
+                gap: 4px;
+                width: 42px;
+                height: 26px;
+                padding: 6px;
+                border-radius: 8px;
+                background: rgba(0, 0, 0, 0.35);
+            }
+
+            .sound-indicator.active {
+                display: flex;
+            }
+
+            .sound-bar {
+                flex: 1;
+                min-height: 4px;
+                border-radius: 2px;
+                background: rgba(100, 200, 255, 0.4);
+                transition: height 0.12s ease, background 0.12s ease;
+            }
+
+            .sound-bar.on {
+                background: #7AF4FF;
+            }
         </style>
         <script>
             window.ga=window.ga||function(){(ga.q=ga.q||[]).push(arguments)};ga.l=+new Date;
@@ -196,6 +247,14 @@
     </head>
     <body>
         <canvas></canvas>
+        <div class="fullscreen-prompt" id="fullscreen_prompt">Click to enter fullscreen</div>
+        <div class="sound-indicator" id="sound_indicator" aria-hidden="true">
+            <span class="sound-bar"></span>
+            <span class="sound-bar"></span>
+            <span class="sound-bar"></span>
+            <span class="sound-bar"></span>
+            <span class="sound-bar"></span>
+        </div>
 
         <!-- Mother of God, pls forgive me -->
         <div class="promo">
