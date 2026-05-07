@@ -123,7 +123,7 @@ if (!ext.supportLinearFiltering) {
     config.SUNRAYS = false;
 }
 
-const baseAudioReactiveSettings = {
+let baseAudioReactiveSettings = {
     SPLAT_FORCE: config.SPLAT_FORCE,
     CURL: config.CURL,
     COLOR_UPDATE_SPEED: config.COLOR_UPDATE_SPEED
@@ -162,6 +162,7 @@ const CURL_RANGE = 35;
 const COLOR_SPEED_BASE = 4;
 const COLOR_SPEED_RANGE = 16;
 const AUDIO_REACTIVE_LERP = 0.1;
+const LOW_ENERGY_BLEND = 0.5;
 const AUDIO_SAMPLE_CENTER = 128;
 const AUDIO_SAMPLE_RANGE = 128;
 const AUDIO_SAMPLE_MAX_VALUE = 255;
@@ -169,7 +170,7 @@ const AUDIO_SAMPLE_MAX_VALUE = 255;
 audioEnergyHistory = new Array(ENERGY_HISTORY_SIZE).fill(0);
 
 const gui = startGUI();
-if (presentationMode && gui && typeof gui.hide === 'function')
+if (presentationMode && gui)
     gui.hide();
 
 setupFullscreenControls();
@@ -417,6 +418,7 @@ async function enableAudioFromStream (streamFactory) {
     }
 
     try {
+        refreshBaseAudioReactiveSettings();
         const stream = await streamFactory();
         initializeAudioPipeline(stream);
         config.AUDIO_ENABLED = true;
@@ -475,6 +477,14 @@ function disableAudioCapture () {
     audioFrequencyData = null;
     audioTimeData = null;
     updateSoundIndicator(0, false);
+}
+
+function refreshBaseAudioReactiveSettings () {
+    baseAudioReactiveSettings = {
+        SPLAT_FORCE: config.SPLAT_FORCE,
+        CURL: config.CURL,
+        COLOR_UPDATE_SPEED: config.COLOR_UPDATE_SPEED
+    };
 }
 
 function updateSoundIndicator (level, isActive) {
@@ -1375,6 +1385,8 @@ function updateKeywords () {
 
 updateKeywords();
 initFramebuffers();
+if (!presentationMode)
+    multipleSplats(parseInt(Math.random() * 20) + 5);
 
 let lastUpdateTime = Date.now();
 let colorUpdateTimer = 0.0;
@@ -1406,7 +1418,7 @@ function updateAudioReactiveState (dt) {
         const bassEnergy = getFrequencyBandEnergy(60, 250);
         const midEnergy = getFrequencyBandEnergy(250, 2000);
         const trebleEnergy = getFrequencyBandEnergy(2000, audioContext.sampleRate / 2);
-        const lowEnergy = (subBassEnergy + bassEnergy) * 0.5;
+        const lowEnergy = (subBassEnergy + bassEnergy) * LOW_ENERGY_BLEND;
 
         const averageEnergy = getAverageEnergyHistory();
         const now = performance.now();
@@ -1459,14 +1471,21 @@ function calculateRMS (buffer) {
 
 function getFrequencyBandEnergy (minHz, maxHz) {
     if (!audioContext || !audioFrequencyData) return 0;
-    const nyquist = audioContext.sampleRate / 2;
-    const minIndex = Math.max(0, Math.floor(minHz / nyquist * audioFrequencyData.length));
-    const maxIndex = Math.min(audioFrequencyData.length - 1, Math.ceil(maxHz / nyquist * audioFrequencyData.length));
+    const minIndex = frequencyToBinIndex(minHz, true);
+    const maxIndex = frequencyToBinIndex(maxHz, false);
     if (maxIndex <= minIndex) return 0;
     let sum = 0;
     for (let i = minIndex; i <= maxIndex; i++)
         sum += audioFrequencyData[i];
     return (sum / (maxIndex - minIndex + 1)) / AUDIO_SAMPLE_MAX_VALUE;
+}
+
+function frequencyToBinIndex (frequency, floorResult) {
+    const nyquist = audioContext.sampleRate / 2;
+    const rawIndex = frequency / nyquist * audioFrequencyData.length;
+    if (floorResult)
+        return Math.max(0, Math.floor(rawIndex));
+    return Math.min(audioFrequencyData.length - 1, Math.ceil(rawIndex));
 }
 
 function getAverageEnergyHistory () {
