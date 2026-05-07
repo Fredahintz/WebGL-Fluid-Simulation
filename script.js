@@ -438,7 +438,7 @@ function initializeAudioPipeline (stream) {
         return;
     }
 
-    if (audioContext == null)
+    if (audioContext === null)
         audioContext = new AudioContextClass();
     if (audioContext.state === 'suspended')
         audioContext.resume();
@@ -465,11 +465,11 @@ function initializeAudioPipeline (stream) {
 }
 
 function disableAudioCapture () {
-    if (audioSource != null) {
+    if (audioSource !== null) {
         audioSource.disconnect();
         audioSource = null;
     }
-    if (audioStream != null) {
+    if (audioStream !== null) {
         audioStream.getTracks().forEach(track => track.stop());
         audioStream = null;
     }
@@ -1952,7 +1952,7 @@ function lerp (a, b, t) {
 }
 
 function hashCode (s) {
-    if (s.length == 0) return 0;
+    if (s.length === 0) return 0;
     let hash = 0;
     for (let i = 0; i < s.length; i++) {
         hash = (hash << 5) - hash + s.charCodeAt(i);
