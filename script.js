@@ -83,6 +83,8 @@ let config = {
     SUNRAYS_RESOLUTION: 196,
     SUNRAYS_WEIGHT: 1.0,
     AUTO_POINTER: true,
+    AUTO_POINTER_COUNT: 1,
+    AUTO_POINTER_SPEED: 1.0,
 }
 
 function pointerPrototype () {
@@ -224,6 +226,8 @@ function startGUI () {
     } }, 'fun').name('Random splats');
 
     gui.add(config, 'AUTO_POINTER').name('auto pointer');
+    gui.add(config, 'AUTO_POINTER_COUNT', 1, 8).name('pointer count').step(1).onChange(initAutoPointers);
+    gui.add(config, 'AUTO_POINTER_SPEED', 0.1, 5.0).name('pointer speed');
 
     let bloomFolder = gui.addFolder('Bloom');
     bloomFolder.add(config, 'BLOOM').name('enabled').onFinishChange(updateKeywords);
@@ -1176,16 +1180,33 @@ let lastUpdateTime = Date.now();
 let colorUpdateTimer = 0.0;
 
 let autoPointerTime = 0.0;
-let autoPointerFreqDriftTimer = 0.0;
-let autoPointerFreqX = 1.0;
-let autoPointerFreqY = Math.PI; // initial irrational ratio to freqX for a non-repeating start
-let autoPointerObj = new pointerPrototype();
-autoPointerObj.down = true;
-autoPointerObj.texcoordX = 0.5;
-autoPointerObj.texcoordY = 0.5;
-autoPointerObj.prevTexcoordX = 0.5;
-autoPointerObj.prevTexcoordY = 0.5;
-autoPointerObj.color = generateColor();
+let autoPointers = [];
+const AUTO_POINTER_RADIUS = 0.45;
+const AUTO_POINTER_DRIFT_INTERVAL = 5.0;
+
+function initAutoPointers () {
+    autoPointers = [];
+    for (let i = 0; i < config.AUTO_POINTER_COUNT; i++) {
+        const p = new pointerPrototype();
+        p.down = true;
+        // Spread initial phases evenly so pointers don't start on top of each other
+        p.phaseX = (i / config.AUTO_POINTER_COUNT) * Math.PI * 2;
+        p.phaseY = (i / config.AUTO_POINTER_COUNT) * Math.PI * 2 + Math.PI / 3;
+        p.freqX = 0.5 + Math.random() * 2.0;
+        p.freqY = 0.5 + Math.random() * 2.0;
+        p.freqDriftTimer = Math.random() * AUTO_POINTER_DRIFT_INTERVAL; // stagger drift resets
+        const initX = 0.5 + AUTO_POINTER_RADIUS * Math.sin(p.phaseX);
+        const initY = 0.5 + AUTO_POINTER_RADIUS * Math.sin(p.phaseY);
+        p.texcoordX = initX;
+        p.texcoordY = initY;
+        p.prevTexcoordX = initX;
+        p.prevTexcoordY = initY;
+        p.color = generateColor();
+        autoPointers.push(p);
+    }
+}
+
+initAutoPointers();
 update();
 
 function update () {
@@ -1247,30 +1268,33 @@ function applyInputs () {
 function updateAutoPointer (dt) {
     if (!config.AUTO_POINTER) return;
 
-    autoPointerTime += dt;
-    autoPointerFreqDriftTimer += dt;
+    autoPointerTime += dt * config.AUTO_POINTER_SPEED;
 
-    // Every 5 seconds, pick new random frequencies and a new color
-    if (autoPointerFreqDriftTimer >= 5.0) {
-        autoPointerFreqDriftTimer -= 5.0;
-        autoPointerFreqX = 0.5 + Math.random() * 2.0;
-        autoPointerFreqY = 0.5 + Math.random() * 2.0;
-        autoPointerObj.color = generateColor();
-    }
+    autoPointers.forEach(p => {
+        p.freqDriftTimer += dt;
 
-    // Lissajous-style path covering most of the canvas
-    const newX = 0.5 + 0.45 * Math.sin(autoPointerTime * autoPointerFreqX);
-    const newY = 0.5 + 0.45 * Math.sin(autoPointerTime * autoPointerFreqY);
+        // Every AUTO_POINTER_DRIFT_INTERVAL seconds, pick new random frequencies and a new color
+        if (p.freqDriftTimer >= AUTO_POINTER_DRIFT_INTERVAL) {
+            p.freqDriftTimer -= AUTO_POINTER_DRIFT_INTERVAL;
+            p.freqX = 0.5 + Math.random() * 2.0;
+            p.freqY = 0.5 + Math.random() * 2.0;
+            p.color = generateColor();
+        }
 
-    autoPointerObj.prevTexcoordX = autoPointerObj.texcoordX;
-    autoPointerObj.prevTexcoordY = autoPointerObj.texcoordY;
-    autoPointerObj.texcoordX = newX;
-    autoPointerObj.texcoordY = newY;
-    autoPointerObj.deltaX = correctDeltaX(newX - autoPointerObj.prevTexcoordX);
-    autoPointerObj.deltaY = correctDeltaY(newY - autoPointerObj.prevTexcoordY);
+        // Lissajous-style path covering most of the canvas
+        const newX = 0.5 + AUTO_POINTER_RADIUS * Math.sin(autoPointerTime * p.freqX + p.phaseX);
+        const newY = 0.5 + AUTO_POINTER_RADIUS * Math.sin(autoPointerTime * p.freqY + p.phaseY);
 
-    if (Math.abs(autoPointerObj.deltaX) > 0.0001 || Math.abs(autoPointerObj.deltaY) > 0.0001)
-        splatPointer(autoPointerObj);
+        p.prevTexcoordX = p.texcoordX;
+        p.prevTexcoordY = p.texcoordY;
+        p.texcoordX = newX;
+        p.texcoordY = newY;
+        p.deltaX = correctDeltaX(newX - p.prevTexcoordX);
+        p.deltaY = correctDeltaY(newY - p.prevTexcoordY);
+
+        if (Math.abs(p.deltaX) > 0.0001 || Math.abs(p.deltaY) > 0.0001)
+            splatPointer(p);
+    });
 }
 
 function step (dt) {
