@@ -135,12 +135,26 @@ let audioSource = null;
 let audioStream = null;
 let audioFrequencyData = null;
 let audioTimeData = null;
-let audioEnergyHistory = new Array(43).fill(0);
+let audioEnergyHistory = [];
 let audioEnergyHistoryIndex = 0;
 let audioLastBeatTime = 0;
 let audioRMSAverage = 0;
 let ambientSplatTimer = 0;
 let ambientSplatDelay = 0.25;
+
+const ENERGY_HISTORY_SIZE = 43;
+const MIN_BEAT_INTERVAL_MS = 200;
+const QUIET_RMS_THRESHOLD_MULTIPLIER = 1.1;
+const QUIET_RMS_MINIMUM = 0.03;
+const AMBIENT_SPLAT_MIN_DELAY = 2;
+const AMBIENT_SPLAT_MAX_DELAY = 4;
+const RMS_SMOOTHING_FACTOR = 0.95;
+const ENERGY_EPSILON = 0.0001;
+const SOUND_BAR_MIN_HEIGHT = 6;
+const SOUND_BAR_MAX_HEIGHT = 18;
+const SOUND_BAR_HEIGHT_STEP = 2;
+
+audioEnergyHistory = new Array(ENERGY_HISTORY_SIZE).fill(0);
 
 const gui = startGUI();
 if (presentationMode && gui && typeof gui.hide === 'function')
@@ -238,6 +252,7 @@ function supportRenderTextureFormat (gl, internalFormat, format, type) {
     return status == gl.FRAMEBUFFER_COMPLETE;
 }
 
+// Initializes dat.GUI controls and returns the GUI instance for external visibility control.
 function startGUI () {
     let gui = new dat.GUI({ width: 300 });
     gui.add(config, 'DYE_RESOLUTION', { 'high': 1024, 'medium': 512, 'low': 256, 'very low': 128 }).name('quality').onFinishChange(initFramebuffers);
@@ -456,7 +471,7 @@ function updateSoundIndicator (level, isActive) {
     const activeBars = Math.ceil(clamp01(level) * soundBars.length);
     soundBars.forEach((bar, index) => {
         bar.classList.toggle('on', index < activeBars);
-        bar.style.height = `${6 + clamp01(level) * (18 - index * 2)}px`;
+        bar.style.height = `${SOUND_BAR_MIN_HEIGHT + clamp01(level) * (SOUND_BAR_MAX_HEIGHT - index * SOUND_BAR_HEIGHT_STEP)}px`;
     });
 }
 
@@ -1369,7 +1384,7 @@ function updateAudioReactiveState (dt) {
         audioAnalyser.getByteTimeDomainData(audioTimeData);
 
         const rms = calculateRMS(audioTimeData);
-        audioRMSAverage = audioRMSAverage * 0.95 + rms * 0.05;
+        audioRMSAverage = audioRMSAverage * RMS_SMOOTHING_FACTOR + rms * (1 - RMS_SMOOTHING_FACTOR);
         const subBassEnergy = getFrequencyBandEnergy(0, 60);
         const bassEnergy = getFrequencyBandEnergy(60, 250);
         const midEnergy = getFrequencyBandEnergy(250, 2000);
@@ -1378,7 +1393,7 @@ function updateAudioReactiveState (dt) {
 
         const averageEnergy = getAverageEnergyHistory();
         const now = performance.now();
-        const beatDetected = lowEnergy > averageEnergy * config.BEAT_SENSITIVITY && now - audioLastBeatTime > 200;
+        const beatDetected = lowEnergy > averageEnergy * config.BEAT_SENSITIVITY && now - audioLastBeatTime > MIN_BEAT_INTERVAL_MS;
 
         audioEnergyHistory[audioEnergyHistoryIndex] = lowEnergy;
         audioEnergyHistoryIndex = (audioEnergyHistoryIndex + 1) % audioEnergyHistory.length;
@@ -1391,7 +1406,7 @@ function updateAudioReactiveState (dt) {
         config.SPLAT_FORCE = lerp(config.SPLAT_FORCE, 4000 + lowEnergy * 8000, 0.1);
         config.CURL = lerp(config.CURL, 15 + midEnergy * 35, 0.1);
         config.COLOR_UPDATE_SPEED = lerp(config.COLOR_UPDATE_SPEED, 4 + trebleEnergy * 16, 0.1);
-        quietFrame = rms < Math.max(audioRMSAverage * 1.1, 0.03);
+        quietFrame = rms < Math.max(audioRMSAverage * QUIET_RMS_THRESHOLD_MULTIPLIER, QUIET_RMS_MINIMUM);
         updateSoundIndicator(clamp01(rms * 2.5), true);
     } else {
         config.SPLAT_FORCE = lerp(config.SPLAT_FORCE, baseAudioReactiveSettings.SPLAT_FORCE, 0.05);
@@ -1412,7 +1427,7 @@ function updateAmbientSplats (dt, isQuiet) {
     if (ambientSplatTimer >= ambientSplatDelay) {
         splatStack.push(1);
         ambientSplatTimer = 0;
-        ambientSplatDelay = 2 + Math.random() * 2;
+        ambientSplatDelay = AMBIENT_SPLAT_MIN_DELAY + Math.random() * (AMBIENT_SPLAT_MAX_DELAY - AMBIENT_SPLAT_MIN_DELAY);
     }
 }
 
@@ -1441,7 +1456,7 @@ function getAverageEnergyHistory () {
     let sum = 0;
     for (let i = 0; i < audioEnergyHistory.length; i++)
         sum += audioEnergyHistory[i];
-    return sum / audioEnergyHistory.length + 0.0001;
+    return sum / audioEnergyHistory.length + ENERGY_EPSILON;
 }
 
 function calcDeltaTime () {
