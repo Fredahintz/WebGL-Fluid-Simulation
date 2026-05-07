@@ -1774,7 +1774,7 @@ canvas.addEventListener('mousedown', e => {
     if (pointer == null)
         pointer = new pointerPrototype();
     updatePointerDownData(pointer, -1, posX, posY);
-    splat(pointer.texcoordX, pointer.texcoordY, (Math.random() - 0.5) * config.SPLAT_FORCE, (Math.random() - 0.5) * config.SPLAT_FORCE, generateBrightColor());
+    splat(pointer.texcoordX, pointer.texcoordY, randomSplatVelocity(), randomSplatVelocity(), generateBrightColor());
 });
 
 canvas.addEventListener('mousemove', e => {
@@ -1798,7 +1798,7 @@ canvas.addEventListener('touchstart', e => {
         let posX = scaleByPixelRatio(touches[i].pageX);
         let posY = scaleByPixelRatio(touches[i].pageY);
         updatePointerDownData(pointers[i + 1], touches[i].identifier, posX, posY);
-        splat(pointers[i + 1].texcoordX, pointers[i + 1].texcoordY, (Math.random() - 0.5) * config.SPLAT_FORCE, (Math.random() - 0.5) * config.SPLAT_FORCE, generateBrightColor());
+        splat(pointers[i + 1].texcoordX, pointers[i + 1].texcoordY, randomSplatVelocity(), randomSplatVelocity(), generateBrightColor());
     }
 });
 
@@ -1886,6 +1886,10 @@ function generateBrightColor () {
     c.g *= 10.0;
     c.b *= 10.0;
     return c;
+}
+
+function randomSplatVelocity () {
+    return (Math.random() - 0.5) * config.SPLAT_FORCE;
 }
 
 function HSVtoRGB (h, s, v) {
