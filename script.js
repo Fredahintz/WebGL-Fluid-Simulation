@@ -142,6 +142,7 @@ let audioRMSAverage = 0;
 let ambientSplatTimer = 0;
 let ambientSplatDelay = 0.25;
 
+// ~1 second beat detection window at ~43 samples.
 const ENERGY_HISTORY_SIZE = 43;
 const MIN_BEAT_INTERVAL_MS = 200;
 const QUIET_RMS_THRESHOLD_MULTIPLIER = 1.1;
@@ -153,6 +154,16 @@ const ENERGY_EPSILON = 0.0001;
 const SOUND_BAR_MIN_HEIGHT = 6;
 const SOUND_BAR_MAX_HEIGHT = 18;
 const SOUND_BAR_HEIGHT_STEP = 2;
+const RMS_DISPLAY_MULTIPLIER = 2.5;
+const SPLAT_FORCE_BASE = 4000;
+const SPLAT_FORCE_RANGE = 8000;
+const CURL_BASE = 15;
+const CURL_RANGE = 35;
+const COLOR_SPEED_BASE = 4;
+const COLOR_SPEED_RANGE = 16;
+const AUDIO_REACTIVE_LERP = 0.1;
+const AUDIO_SAMPLE_CENTER = 128;
+const AUDIO_SAMPLE_RANGE = 128;
 
 audioEnergyHistory = new Array(ENERGY_HISTORY_SIZE).fill(0);
 
@@ -471,8 +482,12 @@ function updateSoundIndicator (level, isActive) {
     const activeBars = Math.ceil(clamp01(level) * soundBars.length);
     soundBars.forEach((bar, index) => {
         bar.classList.toggle('on', index < activeBars);
-        bar.style.height = `${SOUND_BAR_MIN_HEIGHT + clamp01(level) * (SOUND_BAR_MAX_HEIGHT - index * SOUND_BAR_HEIGHT_STEP)}px`;
+        bar.style.height = `${calculateSoundBarHeight(level, index)}px`;
     });
+}
+
+function calculateSoundBarHeight (level, index) {
+    return SOUND_BAR_MIN_HEIGHT + clamp01(level) * (SOUND_BAR_MAX_HEIGHT - index * SOUND_BAR_HEIGHT_STEP);
 }
 
 function captureScreenshot () {
@@ -1403,11 +1418,11 @@ function updateAudioReactiveState (dt) {
             audioLastBeatTime = now;
         }
 
-        config.SPLAT_FORCE = lerp(config.SPLAT_FORCE, 4000 + lowEnergy * 8000, 0.1);
-        config.CURL = lerp(config.CURL, 15 + midEnergy * 35, 0.1);
-        config.COLOR_UPDATE_SPEED = lerp(config.COLOR_UPDATE_SPEED, 4 + trebleEnergy * 16, 0.1);
+        config.SPLAT_FORCE = lerp(config.SPLAT_FORCE, SPLAT_FORCE_BASE + lowEnergy * SPLAT_FORCE_RANGE, AUDIO_REACTIVE_LERP);
+        config.CURL = lerp(config.CURL, CURL_BASE + midEnergy * CURL_RANGE, AUDIO_REACTIVE_LERP);
+        config.COLOR_UPDATE_SPEED = lerp(config.COLOR_UPDATE_SPEED, COLOR_SPEED_BASE + trebleEnergy * COLOR_SPEED_RANGE, AUDIO_REACTIVE_LERP);
         quietFrame = rms < Math.max(audioRMSAverage * QUIET_RMS_THRESHOLD_MULTIPLIER, QUIET_RMS_MINIMUM);
-        updateSoundIndicator(clamp01(rms * 2.5), true);
+        updateSoundIndicator(clamp01(rms * RMS_DISPLAY_MULTIPLIER), true);
     } else {
         config.SPLAT_FORCE = lerp(config.SPLAT_FORCE, baseAudioReactiveSettings.SPLAT_FORCE, 0.05);
         config.CURL = lerp(config.CURL, baseAudioReactiveSettings.CURL, 0.05);
@@ -1434,7 +1449,7 @@ function updateAmbientSplats (dt, isQuiet) {
 function calculateRMS (buffer) {
     let sum = 0;
     for (let i = 0; i < buffer.length; i++) {
-        const sample = (buffer[i] - 128) / 128;
+        const sample = (buffer[i] - AUDIO_SAMPLE_CENTER) / AUDIO_SAMPLE_RANGE;
         sum += sample * sample;
     }
     return Math.sqrt(sum / buffer.length);
