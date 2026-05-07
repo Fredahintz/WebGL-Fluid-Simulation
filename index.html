@@ -186,6 +186,27 @@
                     opacity: 1;
                 }
             }
+
+            .fullscreen-prompt {
+                display: none;
+                position: absolute;
+                inset: 0;
+                z-index: 5;
+                align-items: center;
+                justify-content: center;
+                background: rgba(0, 0, 0, 0.35);
+                color: #E6F7FF;
+                font-family: Arial, sans-serif;
+                font-size: 1.1rem;
+                letter-spacing: 0.05em;
+                text-transform: uppercase;
+                cursor: pointer;
+            }
+
+            .fullscreen-prompt.visible {
+                display: flex;
+            }
+
         </style>
         <script>
             window.ga=window.ga||function(){(ga.q=ga.q||[]).push(arguments)};ga.l=+new Date;
@@ -196,6 +217,7 @@
     </head>
     <body>
         <canvas></canvas>
+        <div class="fullscreen-prompt" id="fullscreen_prompt">Click to enter fullscreen</div>
 
         <!-- Mother of God, pls forgive me -->
         <div class="promo">

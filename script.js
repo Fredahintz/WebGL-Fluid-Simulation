@@ -26,10 +26,15 @@ SOFTWARE.
 
 // Mobile promo section
 
+const urlParams = new URLSearchParams(window.location.search);
+const presentationMode = urlParams.get('autoplay') === '1' || urlParams.get('present') === '1';
+const desktopMode = !isMobile();
+
 const promoPopup = document.getElementsByClassName('promo')[0];
 const promoPopupClose = document.getElementsByClassName('promo-close')[0];
+const fullscreenPrompt = document.getElementById('fullscreen_prompt');
 
-if (isMobile()) {
+if (isMobile() && !presentationMode) {
     setTimeout(() => {
         promoPopup.style.display = 'table';
     }, 20000);
@@ -113,7 +118,25 @@ if (!ext.supportLinearFiltering) {
     config.SUNRAYS = false;
 }
 
-startGUI();
+const autoplayPointer = {
+    texcoordX: 0.5,
+    texcoordY: 0.5,
+    velocityX: 0.0,
+    velocityY: 0.0,
+    directionTimer: 0.0
+};
+const AUTOPLAY_SPEED_MIN = 0.08;
+const AUTOPLAY_SPEED_MAX = 0.24;
+const AUTOPLAY_DIRECTION_MIN_TIME = 0.5;
+const AUTOPLAY_DIRECTION_MAX_TIME = 1.75;
+const AUTOPLAY_EDGE_PADDING = 0.03;
+
+const gui = startGUI();
+if (presentationMode && gui)
+    gui.hide();
+
+setupFullscreenControls();
+initializeAutoplayPointer();
 
 function getWebGLContext (canvas) {
     const params = { alpha: true, depth: false, stencil: false, antialias: false, preserveDrawingBuffer: false };
@@ -205,8 +228,9 @@ function supportRenderTextureFormat (gl, internalFormat, format, type) {
     return status == gl.FRAMEBUFFER_COMPLETE;
 }
 
+// Initializes dat.GUI controls and returns the GUI instance for external visibility control.
 function startGUI () {
-    var gui = new dat.GUI({ width: 300 });
+    const gui = new dat.GUI({ width: 300 });
     gui.add(config, 'DYE_RESOLUTION', { 'high': 1024, 'medium': 512, 'low': 256, 'very low': 128 }).name('quality').onFinishChange(initFramebuffers);
     gui.add(config, 'SIM_RESOLUTION', { '32': 32, '64': 64, '128': 128, '256': 256 }).name('sim resolution').onFinishChange(initFramebuffers);
     gui.add(config, 'DENSITY_DISSIPATION', 0, 4.0).name('density diffusion');
@@ -278,10 +302,52 @@ function startGUI () {
 
     if (isMobile())
         gui.close();
+
+    return gui;
 }
 
 function isMobile () {
     return /Mobi|Android/i.test(navigator.userAgent);
+}
+
+function setupFullscreenControls () {
+    if (!desktopMode || !fullscreenPrompt) return;
+
+    if (!presentationMode)
+        fullscreenPrompt.classList.add('visible');
+
+    const firstInteractionHandler = () => {
+        requestFullscreenSafe();
+        if (!presentationMode)
+            fullscreenPrompt.classList.remove('visible');
+    };
+
+    window.addEventListener('pointerdown', firstInteractionHandler, { once: true });
+    fullscreenPrompt.addEventListener('click', requestFullscreenSafe);
+
+    document.addEventListener('fullscreenchange', () => {
+        if (presentationMode) return;
+        if (document.fullscreenElement)
+            fullscreenPrompt.classList.remove('visible');
+        else
+            fullscreenPrompt.classList.add('visible');
+    });
+}
+
+function requestFullscreenSafe () {
+    if (!desktopMode || document.fullscreenElement) return;
+    if (!document.documentElement.requestFullscreen) return;
+    document.documentElement.requestFullscreen().catch(() => {});
+}
+
+function toggleFullscreen () {
+    if (!desktopMode) return;
+    if (!document.fullscreenElement) {
+        requestFullscreenSafe();
+        return;
+    }
+    if (document.exitFullscreen)
+        document.exitFullscreen().catch(() => {});
 }
 
 function captureScreenshot () {
@@ -1177,12 +1243,68 @@ function update () {
     const dt = calcDeltaTime();
     if (resizeCanvas())
         initFramebuffers();
+    updateAutoplayPointer(dt);
     updateColors(dt);
     applyInputs();
     if (!config.PAUSED)
         step(dt);
     render(null);
     requestAnimationFrame(update);
+}
+
+function initializeAutoplayPointer () {
+    if (!presentationMode) return;
+    autoplayPointer.texcoordX = 0.5;
+    autoplayPointer.texcoordY = 0.5;
+    resetAutoplayDirection();
+    const pointer = pointers[0];
+    updatePointerDownData(pointer, -1, autoplayPointer.texcoordX * canvas.width, (1.0 - autoplayPointer.texcoordY) * canvas.height);
+    pointer.color = generateBrightColor();
+}
+
+function resetAutoplayDirection () {
+    const angle = Math.random() * Math.PI * 2.0;
+    const speed = AUTOPLAY_SPEED_MIN + Math.random() * (AUTOPLAY_SPEED_MAX - AUTOPLAY_SPEED_MIN);
+    autoplayPointer.velocityX = Math.cos(angle) * speed;
+    autoplayPointer.velocityY = Math.sin(angle) * speed;
+    autoplayPointer.directionTimer = AUTOPLAY_DIRECTION_MIN_TIME + Math.random() * (AUTOPLAY_DIRECTION_MAX_TIME - AUTOPLAY_DIRECTION_MIN_TIME);
+}
+
+function updateAutoplayPointer (dt) {
+    if (!presentationMode) return;
+
+    const pointer = pointers[0];
+    if (!pointer.down)
+        updatePointerDownData(pointer, -1, autoplayPointer.texcoordX * canvas.width, (1.0 - autoplayPointer.texcoordY) * canvas.height);
+
+    autoplayPointer.directionTimer -= dt;
+    if (autoplayPointer.directionTimer <= 0.0) {
+        resetAutoplayDirection();
+        pointer.color = generateBrightColor();
+    }
+
+    autoplayPointer.texcoordX += autoplayPointer.velocityX * dt;
+    autoplayPointer.texcoordY += autoplayPointer.velocityY * dt;
+
+    if (autoplayPointer.texcoordX < AUTOPLAY_EDGE_PADDING) {
+        autoplayPointer.texcoordX = AUTOPLAY_EDGE_PADDING;
+        autoplayPointer.velocityX = Math.abs(autoplayPointer.velocityX);
+    } else if (autoplayPointer.texcoordX > 1.0 - AUTOPLAY_EDGE_PADDING) {
+        autoplayPointer.texcoordX = 1.0 - AUTOPLAY_EDGE_PADDING;
+        autoplayPointer.velocityX = -Math.abs(autoplayPointer.velocityX);
+    }
+
+    if (autoplayPointer.texcoordY < AUTOPLAY_EDGE_PADDING) {
+        autoplayPointer.texcoordY = AUTOPLAY_EDGE_PADDING;
+        autoplayPointer.velocityY = Math.abs(autoplayPointer.velocityY);
+    } else if (autoplayPointer.texcoordY > 1.0 - AUTOPLAY_EDGE_PADDING) {
+        autoplayPointer.texcoordY = 1.0 - AUTOPLAY_EDGE_PADDING;
+        autoplayPointer.velocityY = -Math.abs(autoplayPointer.velocityY);
+    }
+
+    const posX = autoplayPointer.texcoordX * canvas.width;
+    const posY = (1.0 - autoplayPointer.texcoordY) * canvas.height;
+    updatePointerMoveData(pointer, posX, posY);
 }
 
 function calcDeltaTime () {
@@ -1426,10 +1548,7 @@ function splatPointer (pointer) {
 
 function multipleSplats (amount) {
     for (let i = 0; i < amount; i++) {
-        const color = generateColor();
-        color.r *= 10.0;
-        color.g *= 10.0;
-        color.b *= 10.0;
+        const color = generateBrightColor();
         const x = Math.random();
         const y = Math.random();
         const dx = 1000 * (Math.random() - 0.5);
@@ -1468,6 +1587,7 @@ canvas.addEventListener('mousedown', e => {
     if (pointer == null)
         pointer = new pointerPrototype();
     updatePointerDownData(pointer, -1, posX, posY);
+    splat(pointer.texcoordX, pointer.texcoordY, randomSplatVelocity(), randomSplatVelocity(), generateBrightColor());
 });
 
 canvas.addEventListener('mousemove', e => {
@@ -1491,6 +1611,7 @@ canvas.addEventListener('touchstart', e => {
         let posX = scaleByPixelRatio(touches[i].pageX);
         let posY = scaleByPixelRatio(touches[i].pageY);
         updatePointerDownData(pointers[i + 1], touches[i].identifier, posX, posY);
+        splat(pointers[i + 1].texcoordX, pointers[i + 1].texcoordY, randomSplatVelocity(), randomSplatVelocity(), generateBrightColor());
     }
 });
 
@@ -1517,6 +1638,8 @@ window.addEventListener('touchend', e => {
 });
 
 window.addEventListener('keydown', e => {
+    if (e.code === 'KeyF')
+        toggleFullscreen();
     if (e.code === 'KeyP')
         config.PAUSED = !config.PAUSED;
     if (e.key === ' ')
@@ -1568,6 +1691,18 @@ function generateColor () {
     c.g *= 0.15;
     c.b *= 0.15;
     return c;
+}
+
+function generateBrightColor () {
+    let c = generateColor();
+    c.r *= 10.0;
+    c.g *= 10.0;
+    c.b *= 10.0;
+    return c;
+}
+
+function randomSplatVelocity () {
+    return (Math.random() - 0.5) * config.SPLAT_FORCE;
 }
 
 function HSVtoRGB (h, s, v) {
@@ -1636,7 +1771,7 @@ function scaleByPixelRatio (input) {
 }
 
 function hashCode (s) {
-    if (s.length == 0) return 0;
+    if (s.length === 0) return 0;
     let hash = 0;
     for (let i = 0; i < s.length; i++) {
         hash = (hash << 5) - hash + s.charCodeAt(i);
