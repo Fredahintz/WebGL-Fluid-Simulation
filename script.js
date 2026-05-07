@@ -164,6 +164,7 @@ const COLOR_SPEED_RANGE = 16;
 const AUDIO_REACTIVE_LERP = 0.1;
 const AUDIO_SAMPLE_CENTER = 128;
 const AUDIO_SAMPLE_RANGE = 128;
+const AUDIO_SAMPLE_MAX_VALUE = 255;
 
 audioEnergyHistory = new Array(ENERGY_HISTORY_SIZE).fill(0);
 
@@ -265,7 +266,7 @@ function supportRenderTextureFormat (gl, internalFormat, format, type) {
 
 // Initializes dat.GUI controls and returns the GUI instance for external visibility control.
 function startGUI () {
-    let gui = new dat.GUI({ width: 300 });
+    const gui = new dat.GUI({ width: 300 });
     gui.add(config, 'DYE_RESOLUTION', { 'high': 1024, 'medium': 512, 'low': 256, 'very low': 128 }).name('quality').onFinishChange(initFramebuffers);
     gui.add(config, 'SIM_RESOLUTION', { '32': 32, '64': 64, '128': 128, '256': 256 }).name('sim resolution').onFinishChange(initFramebuffers);
     gui.add(config, 'DENSITY_DISSIPATION', 0, 4.0).name('density diffusion');
@@ -304,8 +305,8 @@ function startGUI () {
     });
     soundFolder.add(config, 'BEAT_SENSITIVITY', 0.5, 3.0).name('beat sensitivity');
     soundFolder.add(config, 'AUDIO_SPLAT_COUNT', 1, 5).step(1).name('splats per beat');
-    soundFolder.add({ fun: enableMicrophoneAudio }, 'fun').name('Enable Sound');
-    soundFolder.add({ fun: enableSystemAudio }, 'fun').name('System Audio');
+    soundFolder.add({ enableMic: enableMicrophoneAudio }, 'enableMic').name('Enable Sound');
+    soundFolder.add({ enableSystem: enableSystemAudio }, 'enableSystem').name('System Audio');
 
     let github = gui.add({ fun : () => {
         window.open('https://github.com/PavelDoGreat/WebGL-Fluid-Simulation');
@@ -479,7 +480,7 @@ function disableAudioCapture () {
 function updateSoundIndicator (level, isActive) {
     if (!soundIndicator || soundBars.length === 0) return;
     soundIndicator.classList.toggle('active', isActive);
-    const activeBars = Math.ceil(clamp01(level) * soundBars.length);
+    const activeBars = Math.round(clamp01(level) * soundBars.length);
     soundBars.forEach((bar, index) => {
         bar.classList.toggle('on', index < activeBars);
         bar.style.height = `${calculateSoundBarHeight(level, index)}px`;
@@ -487,7 +488,8 @@ function updateSoundIndicator (level, isActive) {
 }
 
 function calculateSoundBarHeight (level, index) {
-    return SOUND_BAR_MIN_HEIGHT + clamp01(level) * (SOUND_BAR_MAX_HEIGHT - index * SOUND_BAR_HEIGHT_STEP);
+    const scaledHeightRange = Math.max(0, SOUND_BAR_MAX_HEIGHT - index * SOUND_BAR_HEIGHT_STEP);
+    return SOUND_BAR_MIN_HEIGHT + clamp01(level) * scaledHeightRange;
 }
 
 function captureScreenshot () {
@@ -1464,7 +1466,7 @@ function getFrequencyBandEnergy (minHz, maxHz) {
     let sum = 0;
     for (let i = minIndex; i <= maxIndex; i++)
         sum += audioFrequencyData[i];
-    return (sum / (maxIndex - minIndex + 1)) / 255;
+    return (sum / (maxIndex - minIndex + 1)) / AUDIO_SAMPLE_MAX_VALUE;
 }
 
 function getAverageEnergyHistory () {
