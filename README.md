@@ -12,7 +12,7 @@ https://github.com/mharrys/fluids-2d
 
 https://github.com/haxiomic/GPU-Fluid-Experiments
 
-## Windows Fullscreen + Sound-Reactive Setup
+## Fullscreen Autoplay Mode
 
 ### Fullscreen autoplay mode
 
@@ -20,20 +20,7 @@ https://github.com/haxiomic/GPU-Fluid-Experiments
   - Example: `https://paveldogreat.github.io/WebGL-Fluid-Simulation/?autoplay=1`
 - On desktop, first interaction requests browser fullscreen.
 - Press `F` to toggle fullscreen at any time.
-
-### Enable sound reactivity
-
-- Use the **Sound** folder in the GUI:
-  - **Enable Sound**: captures microphone/default recording device with `getUserMedia`.
-  - **System Audio**: uses `getDisplayMedia` (Chrome/Edge) to capture shared tab/window/screen audio.
-
-### Windows Stereo Mix option (for system-wide audio via microphone capture)
-
-1. Open **Sound settings** in Windows.
-2. Set **Stereo Mix** (or equivalent loopback recording device) as the default recording source.
-3. Reload the simulation and use **Enable Sound**.
-
-If Stereo Mix is unavailable, use **System Audio** in Chrome/Edge instead.
+- In autoplay/presentation mode, a virtual pointer stays pressed and moves continuously in random directions, bouncing across the screen to generate ongoing splats.
 
 ## License
 

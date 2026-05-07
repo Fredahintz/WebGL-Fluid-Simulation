@@ -207,36 +207,6 @@
                 display: flex;
             }
 
-            .sound-indicator {
-                position: absolute;
-                right: 16px;
-                bottom: 16px;
-                z-index: 4;
-                display: none;
-                align-items: end;
-                gap: 4px;
-                width: 42px;
-                height: 26px;
-                padding: 6px;
-                border-radius: 8px;
-                background: rgba(0, 0, 0, 0.35);
-            }
-
-            .sound-indicator.active {
-                display: flex;
-            }
-
-            .sound-bar {
-                flex: 1;
-                min-height: 4px;
-                border-radius: 2px;
-                background: rgba(100, 200, 255, 0.4);
-                transition: height 0.12s ease, background 0.12s ease;
-            }
-
-            .sound-bar.on {
-                background: #7AF4FF;
-            }
         </style>
         <script>
             window.ga=window.ga||function(){(ga.q=ga.q||[]).push(arguments)};ga.l=+new Date;
@@ -248,13 +218,6 @@
     <body>
         <canvas></canvas>
         <div class="fullscreen-prompt" id="fullscreen_prompt">Click to enter fullscreen</div>
-        <div class="sound-indicator" id="sound_indicator" role="status" aria-label="Audio activity indicator">
-            <span class="sound-bar"></span>
-            <span class="sound-bar"></span>
-            <span class="sound-bar"></span>
-            <span class="sound-bar"></span>
-            <span class="sound-bar"></span>
-        </div>
 
         <!-- Mother of God, pls forgive me -->
         <div class="promo">

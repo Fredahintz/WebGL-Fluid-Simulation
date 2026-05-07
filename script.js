@@ -33,8 +33,6 @@ const desktopMode = !isMobile();
 const promoPopup = document.getElementsByClassName('promo')[0];
 const promoPopupClose = document.getElementsByClassName('promo-close')[0];
 const fullscreenPrompt = document.getElementById('fullscreen_prompt');
-const soundIndicator = document.getElementById('sound_indicator');
-const soundBars = Array.from(document.querySelectorAll('.sound-bar'));
 
 if (isMobile() && !presentationMode) {
     setTimeout(() => {
@@ -89,9 +87,6 @@ let config = {
     SUNRAYS: true,
     SUNRAYS_RESOLUTION: 196,
     SUNRAYS_WEIGHT: 1.0,
-    AUDIO_ENABLED: false,
-    BEAT_SENSITIVITY: 1.4,
-    AUDIO_SPLAT_COUNT: 2,
 }
 
 function pointerPrototype () {
@@ -123,57 +118,25 @@ if (!ext.supportLinearFiltering) {
     config.SUNRAYS = false;
 }
 
-let baseAudioReactiveSettings = {
-    SPLAT_FORCE: config.SPLAT_FORCE,
-    CURL: config.CURL,
-    COLOR_UPDATE_SPEED: config.COLOR_UPDATE_SPEED
+const autoplayPointer = {
+    texcoordX: 0.5,
+    texcoordY: 0.5,
+    velocityX: 0.0,
+    velocityY: 0.0,
+    directionTimer: 0.0
 };
-
-let audioContext = null;
-let audioAnalyser = null;
-let audioSource = null;
-let audioStream = null;
-let audioFrequencyData = null;
-let audioTimeData = null;
-let audioEnergyHistory = [];
-let audioEnergyHistoryIndex = 0;
-let audioLastBeatTime = 0;
-let audioRMSAverage = 0;
-let ambientSplatTimer = 0;
-let ambientSplatDelay = 0.25;
-
-// ~1 second beat detection window at ~43 samples.
-const ENERGY_HISTORY_SIZE = 43;
-const MIN_BEAT_INTERVAL_MS = 200;
-const QUIET_RMS_THRESHOLD_MULTIPLIER = 1.1;
-const QUIET_RMS_MINIMUM = 0.03;
-const AMBIENT_SPLAT_MIN_DELAY = 2;
-const AMBIENT_SPLAT_MAX_DELAY = 4;
-const RMS_SMOOTHING_FACTOR = 0.95;
-const ENERGY_EPSILON = 0.0001;
-const SOUND_BAR_MIN_HEIGHT = 6;
-const SOUND_BAR_MAX_HEIGHT = 18;
-const SOUND_BAR_HEIGHT_STEP = 2;
-const RMS_DISPLAY_MULTIPLIER = 2.5;
-const SPLAT_FORCE_BASE = 4000;
-const SPLAT_FORCE_RANGE = 8000;
-const CURL_BASE = 15;
-const CURL_RANGE = 35;
-const COLOR_SPEED_BASE = 4;
-const COLOR_SPEED_RANGE = 16;
-const AUDIO_REACTIVE_LERP = 0.1;
-const LOW_ENERGY_BLEND = 0.5;
-const AUDIO_SAMPLE_CENTER = 128;
-const AUDIO_SAMPLE_RANGE = 128;
-const AUDIO_SAMPLE_MAX_VALUE = 255;
-
-audioEnergyHistory = new Array(ENERGY_HISTORY_SIZE).fill(0);
+const AUTOPLAY_SPEED_MIN = 0.08;
+const AUTOPLAY_SPEED_MAX = 0.24;
+const AUTOPLAY_DIRECTION_MIN_TIME = 0.5;
+const AUTOPLAY_DIRECTION_MAX_TIME = 1.75;
+const AUTOPLAY_EDGE_PADDING = 0.03;
 
 const gui = startGUI();
 if (presentationMode && gui)
     gui.hide();
 
 setupFullscreenControls();
+initializeAutoplayPointer();
 
 function getWebGLContext (canvas) {
     const params = { alpha: true, depth: false, stencil: false, antialias: false, preserveDrawingBuffer: false };
@@ -297,18 +260,6 @@ function startGUI () {
     captureFolder.add(config, 'TRANSPARENT').name('transparent');
     captureFolder.add({ fun: captureScreenshot }, 'fun').name('take screenshot');
 
-    let soundFolder = gui.addFolder('Sound');
-    soundFolder.add(config, 'AUDIO_ENABLED').name('audio enabled').listen().onFinishChange(value => {
-        if (value)
-            enableMicrophoneAudio();
-        else
-            disableAudioCapture();
-    });
-    soundFolder.add(config, 'BEAT_SENSITIVITY', 0.5, 3.0).name('beat sensitivity');
-    soundFolder.add(config, 'AUDIO_SPLAT_COUNT', 1, 5).step(1).name('splats per beat');
-    soundFolder.add({ enableMic: enableMicrophoneAudio }, 'enableMic').name('Enable Sound');
-    soundFolder.add({ enableSystem: enableSystemAudio }, 'enableSystem').name('System Audio');
-
     let github = gui.add({ fun : () => {
         window.open('https://github.com/PavelDoGreat/WebGL-Fluid-Simulation');
         ga('send', 'event', 'link button', 'github');
@@ -397,109 +348,6 @@ function toggleFullscreen () {
     }
     if (document.exitFullscreen)
         document.exitFullscreen().catch(() => {});
-}
-
-async function enableMicrophoneAudio () {
-    await enableAudioFromStream(async () => {
-        return await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    });
-}
-
-async function enableSystemAudio () {
-    await enableAudioFromStream(async () => {
-        return await navigator.mediaDevices.getDisplayMedia({ audio: true, video: false });
-    });
-}
-
-async function enableAudioFromStream (streamFactory) {
-    if (!navigator.mediaDevices) {
-        config.AUDIO_ENABLED = false;
-        return;
-    }
-
-    try {
-        refreshBaseAudioReactiveSettings();
-        const stream = await streamFactory();
-        initializeAudioPipeline(stream);
-        config.AUDIO_ENABLED = true;
-    } catch (e) {
-        console.error('Audio capture failed:', e);
-        config.AUDIO_ENABLED = false;
-        updateSoundIndicator(0, false);
-    }
-}
-
-function initializeAudioPipeline (stream) {
-    disableAudioCapture();
-    audioStream = stream;
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextClass) {
-        config.AUDIO_ENABLED = false;
-        return;
-    }
-
-    if (audioContext === null)
-        audioContext = new AudioContextClass();
-    if (audioContext.state === 'suspended')
-        audioContext.resume();
-
-    audioAnalyser = audioContext.createAnalyser();
-    audioAnalyser.fftSize = 512;
-    audioAnalyser.smoothingTimeConstant = 0.75;
-    audioSource = audioContext.createMediaStreamSource(stream);
-    audioSource.connect(audioAnalyser);
-
-    audioFrequencyData = new Uint8Array(audioAnalyser.frequencyBinCount);
-    audioTimeData = new Uint8Array(audioAnalyser.fftSize);
-    audioEnergyHistory.fill(0);
-    audioEnergyHistoryIndex = 0;
-    audioLastBeatTime = 0;
-    audioRMSAverage = 0;
-
-    stream.getAudioTracks().forEach(track => {
-        track.addEventListener('ended', () => {
-            config.AUDIO_ENABLED = false;
-            updateSoundIndicator(0, false);
-        });
-    });
-}
-
-function disableAudioCapture () {
-    if (audioSource !== null) {
-        audioSource.disconnect();
-        audioSource = null;
-    }
-    if (audioStream !== null) {
-        audioStream.getTracks().forEach(track => track.stop());
-        audioStream = null;
-    }
-    audioAnalyser = null;
-    audioFrequencyData = null;
-    audioTimeData = null;
-    updateSoundIndicator(0, false);
-}
-
-function refreshBaseAudioReactiveSettings () {
-    baseAudioReactiveSettings = {
-        SPLAT_FORCE: config.SPLAT_FORCE,
-        CURL: config.CURL,
-        COLOR_UPDATE_SPEED: config.COLOR_UPDATE_SPEED
-    };
-}
-
-function updateSoundIndicator (level, isActive) {
-    if (!soundIndicator || soundBars.length === 0) return;
-    soundIndicator.classList.toggle('active', isActive);
-    const activeBars = Math.round(clamp01(level) * soundBars.length);
-    soundBars.forEach((bar, index) => {
-        bar.classList.toggle('on', index < activeBars);
-        bar.style.height = `${calculateSoundBarHeight(level, index)}px`;
-    });
-}
-
-function calculateSoundBarHeight (level, index) {
-    const scaledHeightRange = Math.max(0, SOUND_BAR_MAX_HEIGHT - index * SOUND_BAR_HEIGHT_STEP);
-    return SOUND_BAR_MIN_HEIGHT + clamp01(level) * scaledHeightRange;
 }
 
 function captureScreenshot () {
@@ -1395,7 +1243,7 @@ function update () {
     const dt = calcDeltaTime();
     if (resizeCanvas())
         initFramebuffers();
-    updateAudioReactiveState(dt);
+    updateAutoplayPointer(dt);
     updateColors(dt);
     applyInputs();
     if (!config.PAUSED)
@@ -1404,94 +1252,59 @@ function update () {
     requestAnimationFrame(update);
 }
 
-function updateAudioReactiveState (dt) {
-    let quietFrame = true;
+function initializeAutoplayPointer () {
+    if (!presentationMode) return;
+    autoplayPointer.texcoordX = 0.5;
+    autoplayPointer.texcoordY = 0.5;
+    resetAutoplayDirection();
+    const pointer = pointers[0];
+    updatePointerDownData(pointer, -1, autoplayPointer.texcoordX * canvas.width, (1.0 - autoplayPointer.texcoordY) * canvas.height);
+    pointer.color = generateBrightColor();
+}
 
-    if (config.AUDIO_ENABLED && audioAnalyser && audioFrequencyData && audioTimeData && audioContext) {
-        audioAnalyser.getByteFrequencyData(audioFrequencyData);
-        audioAnalyser.getByteTimeDomainData(audioTimeData);
+function resetAutoplayDirection () {
+    const angle = Math.random() * Math.PI * 2.0;
+    const speed = AUTOPLAY_SPEED_MIN + Math.random() * (AUTOPLAY_SPEED_MAX - AUTOPLAY_SPEED_MIN);
+    autoplayPointer.velocityX = Math.cos(angle) * speed;
+    autoplayPointer.velocityY = Math.sin(angle) * speed;
+    autoplayPointer.directionTimer = AUTOPLAY_DIRECTION_MIN_TIME + Math.random() * (AUTOPLAY_DIRECTION_MAX_TIME - AUTOPLAY_DIRECTION_MIN_TIME);
+}
 
-        const rms = calculateRMS(audioTimeData);
-        audioRMSAverage = audioRMSAverage * RMS_SMOOTHING_FACTOR + rms * (1 - RMS_SMOOTHING_FACTOR);
-        const subBassEnergy = getFrequencyBandEnergy(0, 60);
-        const bassEnergy = getFrequencyBandEnergy(60, 250);
-        const midEnergy = getFrequencyBandEnergy(250, 2000);
-        const trebleEnergy = getFrequencyBandEnergy(2000, audioContext.sampleRate / 2);
-        const lowEnergy = (subBassEnergy + bassEnergy) * LOW_ENERGY_BLEND;
+function updateAutoplayPointer (dt) {
+    if (!presentationMode) return;
 
-        const averageEnergy = getAverageEnergyHistory();
-        const now = performance.now();
-        const beatDetected = lowEnergy > averageEnergy * config.BEAT_SENSITIVITY && now - audioLastBeatTime > MIN_BEAT_INTERVAL_MS;
+    const pointer = pointers[0];
+    if (!pointer.down)
+        updatePointerDownData(pointer, -1, autoplayPointer.texcoordX * canvas.width, (1.0 - autoplayPointer.texcoordY) * canvas.height);
 
-        audioEnergyHistory[audioEnergyHistoryIndex] = lowEnergy;
-        audioEnergyHistoryIndex = (audioEnergyHistoryIndex + 1) % audioEnergyHistory.length;
-
-        if (beatDetected) {
-            splatStack.push(config.AUDIO_SPLAT_COUNT);
-            audioLastBeatTime = now;
-        }
-
-        config.SPLAT_FORCE = lerp(config.SPLAT_FORCE, SPLAT_FORCE_BASE + lowEnergy * SPLAT_FORCE_RANGE, AUDIO_REACTIVE_LERP);
-        config.CURL = lerp(config.CURL, CURL_BASE + midEnergy * CURL_RANGE, AUDIO_REACTIVE_LERP);
-        config.COLOR_UPDATE_SPEED = lerp(config.COLOR_UPDATE_SPEED, COLOR_SPEED_BASE + trebleEnergy * COLOR_SPEED_RANGE, AUDIO_REACTIVE_LERP);
-        quietFrame = rms < Math.max(audioRMSAverage * QUIET_RMS_THRESHOLD_MULTIPLIER, QUIET_RMS_MINIMUM);
-        updateSoundIndicator(clamp01(rms * RMS_DISPLAY_MULTIPLIER), true);
-    } else {
-        config.SPLAT_FORCE = lerp(config.SPLAT_FORCE, baseAudioReactiveSettings.SPLAT_FORCE, 0.05);
-        config.CURL = lerp(config.CURL, baseAudioReactiveSettings.CURL, 0.05);
-        config.COLOR_UPDATE_SPEED = lerp(config.COLOR_UPDATE_SPEED, baseAudioReactiveSettings.COLOR_UPDATE_SPEED, 0.05);
-        updateSoundIndicator(0, false);
+    autoplayPointer.directionTimer -= dt;
+    if (autoplayPointer.directionTimer <= 0.0) {
+        resetAutoplayDirection();
+        pointer.color = generateBrightColor();
     }
 
-    updateAmbientSplats(dt, quietFrame);
-}
+    autoplayPointer.texcoordX += autoplayPointer.velocityX * dt;
+    autoplayPointer.texcoordY += autoplayPointer.velocityY * dt;
 
-function updateAmbientSplats (dt, isQuiet) {
-    if (!isQuiet) {
-        ambientSplatTimer = 0;
-        return;
+    if (autoplayPointer.texcoordX < AUTOPLAY_EDGE_PADDING) {
+        autoplayPointer.texcoordX = AUTOPLAY_EDGE_PADDING;
+        autoplayPointer.velocityX = Math.abs(autoplayPointer.velocityX);
+    } else if (autoplayPointer.texcoordX > 1.0 - AUTOPLAY_EDGE_PADDING) {
+        autoplayPointer.texcoordX = 1.0 - AUTOPLAY_EDGE_PADDING;
+        autoplayPointer.velocityX = -Math.abs(autoplayPointer.velocityX);
     }
-    ambientSplatTimer += dt;
-    if (ambientSplatTimer >= ambientSplatDelay) {
-        splatStack.push(1);
-        ambientSplatTimer = 0;
-        ambientSplatDelay = AMBIENT_SPLAT_MIN_DELAY + Math.random() * (AMBIENT_SPLAT_MAX_DELAY - AMBIENT_SPLAT_MIN_DELAY);
+
+    if (autoplayPointer.texcoordY < AUTOPLAY_EDGE_PADDING) {
+        autoplayPointer.texcoordY = AUTOPLAY_EDGE_PADDING;
+        autoplayPointer.velocityY = Math.abs(autoplayPointer.velocityY);
+    } else if (autoplayPointer.texcoordY > 1.0 - AUTOPLAY_EDGE_PADDING) {
+        autoplayPointer.texcoordY = 1.0 - AUTOPLAY_EDGE_PADDING;
+        autoplayPointer.velocityY = -Math.abs(autoplayPointer.velocityY);
     }
-}
 
-function calculateRMS (buffer) {
-    let sum = 0;
-    for (let i = 0; i < buffer.length; i++) {
-        const sample = (buffer[i] - AUDIO_SAMPLE_CENTER) / AUDIO_SAMPLE_RANGE;
-        sum += sample * sample;
-    }
-    return Math.sqrt(sum / buffer.length);
-}
-
-function getFrequencyBandEnergy (minHz, maxHz) {
-    if (!audioContext || !audioFrequencyData) return 0;
-    const minIndex = frequencyToBinIndex(minHz, true);
-    const maxIndex = frequencyToBinIndex(maxHz, false);
-    if (maxIndex <= minIndex) return 0;
-    let sum = 0;
-    for (let i = minIndex; i <= maxIndex; i++)
-        sum += audioFrequencyData[i];
-    return (sum / (maxIndex - minIndex + 1)) / AUDIO_SAMPLE_MAX_VALUE;
-}
-
-function frequencyToBinIndex (frequency, floorResult) {
-    const nyquist = audioContext.sampleRate / 2;
-    const rawIndex = frequency / nyquist * audioFrequencyData.length;
-    if (floorResult)
-        return Math.max(0, Math.floor(rawIndex));
-    return Math.min(audioFrequencyData.length - 1, Math.ceil(rawIndex));
-}
-
-function getAverageEnergyHistory () {
-    let sum = 0;
-    for (let i = 0; i < audioEnergyHistory.length; i++)
-        sum += audioEnergyHistory[i];
-    return sum / audioEnergyHistory.length + ENERGY_EPSILON;
+    const posX = autoplayPointer.texcoordX * canvas.width;
+    const posY = (1.0 - autoplayPointer.texcoordY) * canvas.height;
+    updatePointerMoveData(pointer, posX, posY);
 }
 
 function calcDeltaTime () {
