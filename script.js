@@ -1179,10 +1179,13 @@ multipleSplats(parseInt(Math.random() * 20) + 5);
 let lastUpdateTime = Date.now();
 let colorUpdateTimer = 0.0;
 
-let autoPointerTime = 0.0;
 let autoPointers = [];
 const AUTO_POINTER_RADIUS = 0.45;
-const AUTO_POINTER_DRIFT_INTERVAL = 5.0;
+const AUTO_POINTER_BOUNDARY_MARGIN = 0.05;
+const AUTO_POINTER_BASE_MAX_VELOCITY = 0.45;
+const AUTO_POINTER_TARGET_INTERVAL_MIN = 0.4;
+const AUTO_POINTER_TARGET_INTERVAL_MAX = 1.2;
+const AUTO_POINTER_VELOCITY_SMOOTHNESS = 4.0;
 
 function initAutoPointers () {
     autoPointers = [];
@@ -1192,15 +1195,17 @@ function initAutoPointers () {
         // Spread initial phases evenly so pointers don't start on top of each other
         p.phaseX = (i / config.AUTO_POINTER_COUNT) * Math.PI * 2;
         p.phaseY = (i / config.AUTO_POINTER_COUNT) * Math.PI * 2 + Math.PI / 3;
-        p.freqX = 0.5 + Math.random() * 2.0;
-        p.freqY = 0.5 + Math.random() * 2.0;
-        p.freqDriftTimer = Math.random() * AUTO_POINTER_DRIFT_INTERVAL; // stagger drift resets
         const initX = 0.5 + AUTO_POINTER_RADIUS * Math.sin(p.phaseX);
         const initY = 0.5 + AUTO_POINTER_RADIUS * Math.sin(p.phaseY);
         p.texcoordX = initX;
         p.texcoordY = initY;
         p.prevTexcoordX = initX;
         p.prevTexcoordY = initY;
+        p.velX = 0;
+        p.velY = 0;
+        p.targetVelX = 0;
+        p.targetVelY = 0;
+        p.targetVelTimer = 0;
         p.color = generateColor();
         autoPointers.push(p);
     }
@@ -1268,22 +1273,46 @@ function applyInputs () {
 function updateAutoPointer (dt) {
     if (!config.AUTO_POINTER) return;
 
-    autoPointerTime += dt * config.AUTO_POINTER_SPEED;
-
     autoPointers.forEach(p => {
-        p.freqDriftTimer += dt;
+        p.targetVelTimer -= dt;
 
-        // Every AUTO_POINTER_DRIFT_INTERVAL seconds, pick new random frequencies and a new color
-        if (p.freqDriftTimer >= AUTO_POINTER_DRIFT_INTERVAL) {
-            p.freqDriftTimer -= AUTO_POINTER_DRIFT_INTERVAL;
-            p.freqX = 0.5 + Math.random() * 2.0;
-            p.freqY = 0.5 + Math.random() * 2.0;
+        if (p.targetVelTimer <= 0) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = AUTO_POINTER_BASE_MAX_VELOCITY * (0.3 + Math.random() * 0.7);
+            p.targetVelX = Math.cos(angle) * speed;
+            p.targetVelY = Math.sin(angle) * speed;
+            p.targetVelTimer = AUTO_POINTER_TARGET_INTERVAL_MIN + Math.random() * (AUTO_POINTER_TARGET_INTERVAL_MAX - AUTO_POINTER_TARGET_INTERVAL_MIN);
             p.color = generateColor();
         }
 
-        // Lissajous-style path covering most of the canvas
-        const newX = 0.5 + AUTO_POINTER_RADIUS * Math.sin(autoPointerTime * p.freqX + p.phaseX);
-        const newY = 0.5 + AUTO_POINTER_RADIUS * Math.sin(autoPointerTime * p.freqY + p.phaseY);
+        const velocityLerp = 1.0 - Math.exp(-AUTO_POINTER_VELOCITY_SMOOTHNESS * dt);
+        p.velX += (p.targetVelX - p.velX) * velocityLerp;
+        p.velY += (p.targetVelY - p.velY) * velocityLerp;
+
+        let newX = p.texcoordX + p.velX * dt * config.AUTO_POINTER_SPEED;
+        let newY = p.texcoordY + p.velY * dt * config.AUTO_POINTER_SPEED;
+        const minPos = AUTO_POINTER_BOUNDARY_MARGIN;
+        const maxPos = 1.0 - AUTO_POINTER_BOUNDARY_MARGIN;
+
+        if (newX < minPos) {
+            newX = minPos + (minPos - newX);
+            p.velX = Math.abs(p.velX);
+            p.targetVelX = Math.abs(p.targetVelX);
+        } else if (newX > maxPos) {
+            newX = maxPos - (newX - maxPos);
+            p.velX = -Math.abs(p.velX);
+            p.targetVelX = -Math.abs(p.targetVelX);
+        }
+
+        if (newY < minPos) {
+            newY = minPos + (minPos - newY);
+            p.velY = Math.abs(p.velY);
+            p.targetVelY = Math.abs(p.targetVelY);
+        } else if (newY > maxPos) {
+            newY = maxPos - (newY - maxPos);
+            p.velY = -Math.abs(p.velY);
+            p.targetVelY = -Math.abs(p.targetVelY);
+        }
 
         p.prevTexcoordX = p.texcoordX;
         p.prevTexcoordY = p.texcoordY;
