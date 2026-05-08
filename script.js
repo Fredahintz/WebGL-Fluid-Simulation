@@ -1192,11 +1192,9 @@ function initAutoPointers () {
     for (let i = 0; i < config.AUTO_POINTER_COUNT; i++) {
         const p = new pointerPrototype();
         p.down = true;
-        // Spread initial phases evenly so pointers don't start on top of each other
-        p.phaseX = (i / config.AUTO_POINTER_COUNT) * Math.PI * 2;
-        p.phaseY = (i / config.AUTO_POINTER_COUNT) * Math.PI * 2 + Math.PI / 3;
-        const initX = 0.5 + AUTO_POINTER_RADIUS * Math.sin(p.phaseX);
-        const initY = 0.5 + AUTO_POINTER_RADIUS * Math.sin(p.phaseY);
+        const startAngle = (i / config.AUTO_POINTER_COUNT) * Math.PI * 2;
+        const initX = 0.5 + AUTO_POINTER_RADIUS * Math.cos(startAngle);
+        const initY = 0.5 + AUTO_POINTER_RADIUS * Math.sin(startAngle);
         p.texcoordX = initX;
         p.texcoordY = initY;
         p.prevTexcoordX = initX;
@@ -1286,32 +1284,34 @@ function updateAutoPointer (dt) {
         }
 
         const velocityLerp = 1.0 - Math.exp(-AUTO_POINTER_VELOCITY_SMOOTHNESS * dt);
-        p.velX += (p.targetVelX - p.velX) * velocityLerp;
-        p.velY += (p.targetVelY - p.velY) * velocityLerp;
+        const desiredVelX = p.targetVelX * config.AUTO_POINTER_SPEED;
+        const desiredVelY = p.targetVelY * config.AUTO_POINTER_SPEED;
+        p.velX += (desiredVelX - p.velX) * velocityLerp;
+        p.velY += (desiredVelY - p.velY) * velocityLerp;
 
-        let newX = p.texcoordX + p.velX * dt * config.AUTO_POINTER_SPEED;
-        let newY = p.texcoordY + p.velY * dt * config.AUTO_POINTER_SPEED;
+        let newX = p.texcoordX + p.velX * dt;
+        let newY = p.texcoordY + p.velY * dt;
         const minPos = AUTO_POINTER_BOUNDARY_MARGIN;
         const maxPos = 1.0 - AUTO_POINTER_BOUNDARY_MARGIN;
 
         if (newX < minPos) {
             newX = minPos + (minPos - newX);
             p.velX = Math.abs(p.velX);
-            p.targetVelX = Math.abs(p.targetVelX);
+            p.targetVelTimer = 0;
         } else if (newX > maxPos) {
             newX = maxPos - (newX - maxPos);
             p.velX = -Math.abs(p.velX);
-            p.targetVelX = -Math.abs(p.targetVelX);
+            p.targetVelTimer = 0;
         }
 
         if (newY < minPos) {
             newY = minPos + (minPos - newY);
             p.velY = Math.abs(p.velY);
-            p.targetVelY = Math.abs(p.targetVelY);
+            p.targetVelTimer = 0;
         } else if (newY > maxPos) {
             newY = maxPos - (newY - maxPos);
             p.velY = -Math.abs(p.velY);
-            p.targetVelY = -Math.abs(p.targetVelY);
+            p.targetVelTimer = 0;
         }
 
         p.prevTexcoordX = p.texcoordX;
