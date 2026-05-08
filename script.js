@@ -82,6 +82,9 @@ let config = {
     SUNRAYS: true,
     SUNRAYS_RESOLUTION: 196,
     SUNRAYS_WEIGHT: 1.0,
+    AUTO_POINTER: true,
+    AUTO_POINTER_COUNT: 1,
+    AUTO_POINTER_SPEED: 1.0,
 }
 
 function pointerPrototype () {
@@ -221,6 +224,10 @@ function startGUI () {
     gui.add({ fun: () => {
         splatStack.push(parseInt(Math.random() * 20) + 5);
     } }, 'fun').name('Random splats');
+
+    gui.add(config, 'AUTO_POINTER').name('auto pointer');
+    gui.add(config, 'AUTO_POINTER_COUNT', 1, 8).name('pointer count').step(1).onChange(initAutoPointers);
+    gui.add(config, 'AUTO_POINTER_SPEED', 0.1, 5.0).name('pointer speed');
 
     let bloomFolder = gui.addFolder('Bloom');
     bloomFolder.add(config, 'BLOOM').name('enabled').onFinishChange(updateKeywords);
@@ -1171,6 +1178,44 @@ multipleSplats(parseInt(Math.random() * 20) + 5);
 
 let lastUpdateTime = Date.now();
 let colorUpdateTimer = 0.0;
+
+let autoPointers = [];
+const AUTO_POINTER_RADIUS = 0.45;
+const AUTO_POINTER_BOUNDARY_MARGIN = 0.05;
+const AUTO_POINTER_BASE_MAX_VELOCITY = 0.45;
+const AUTO_POINTER_TARGET_INTERVAL_MIN = 0.4;
+const AUTO_POINTER_TARGET_INTERVAL_MAX = 1.2;
+const AUTO_POINTER_VELOCITY_SMOOTHNESS = 4.0;
+const AUTO_POINTER_MAX_DT = 0.0333;
+const AUTO_POINTER_MIN_SPEED_RATIO = 0.3;
+const AUTO_POINTER_MAX_SPEED_RATIO = 1.0;
+const AUTO_POINTER_SPEED_RANGE = AUTO_POINTER_MAX_SPEED_RATIO - AUTO_POINTER_MIN_SPEED_RATIO;
+const AUTO_POINTER_TARGET_INTERVAL_RANGE = AUTO_POINTER_TARGET_INTERVAL_MAX - AUTO_POINTER_TARGET_INTERVAL_MIN;
+const AUTO_POINTER_MIN_DELTA_THRESHOLD = 0.0001;
+
+function initAutoPointers () {
+    autoPointers = [];
+    for (let i = 0; i < config.AUTO_POINTER_COUNT; i++) {
+        const p = new pointerPrototype();
+        p.down = true;
+        const startAngle = (i / config.AUTO_POINTER_COUNT) * Math.PI * 2;
+        const initX = 0.5 + AUTO_POINTER_RADIUS * Math.cos(startAngle);
+        const initY = 0.5 + AUTO_POINTER_RADIUS * Math.sin(startAngle);
+        p.texcoordX = initX;
+        p.texcoordY = initY;
+        p.prevTexcoordX = initX;
+        p.prevTexcoordY = initY;
+        p.velX = 0;
+        p.velY = 0;
+        p.targetVelX = 0;
+        p.targetVelY = 0;
+        p.targetVelTimer = 0;
+        p.color = generateColor();
+        autoPointers.push(p);
+    }
+}
+
+initAutoPointers();
 update();
 
 function update () {
@@ -1178,6 +1223,7 @@ function update () {
     if (resizeCanvas())
         initFramebuffers();
     updateColors(dt);
+    updateAutoPointer(dt);
     applyInputs();
     if (!config.PAUSED)
         step(dt);
@@ -1225,6 +1271,62 @@ function applyInputs () {
             p.moved = false;
             splatPointer(p);
         }
+    });
+}
+
+function updateAutoPointer (dt) {
+    if (!config.AUTO_POINTER) return;
+    const safeDt = Math.min(dt, AUTO_POINTER_MAX_DT);
+
+    autoPointers.forEach(p => {
+        p.targetVelTimer -= safeDt;
+
+        if (p.targetVelTimer <= 0) {
+            const angle = Math.random() * Math.PI * 2;
+            const speedRatio = AUTO_POINTER_MIN_SPEED_RATIO + Math.random() * AUTO_POINTER_SPEED_RANGE;
+            const speed = AUTO_POINTER_BASE_MAX_VELOCITY * speedRatio;
+            p.targetVelX = Math.cos(angle) * speed;
+            p.targetVelY = Math.sin(angle) * speed;
+            p.targetVelTimer = AUTO_POINTER_TARGET_INTERVAL_MIN + Math.random() * AUTO_POINTER_TARGET_INTERVAL_RANGE;
+            p.color = generateColor();
+        }
+
+        const velocityLerp = 1.0 - Math.exp(-AUTO_POINTER_VELOCITY_SMOOTHNESS * safeDt);
+        const desiredVelX = p.targetVelX * config.AUTO_POINTER_SPEED;
+        const desiredVelY = p.targetVelY * config.AUTO_POINTER_SPEED;
+        p.velX += (desiredVelX - p.velX) * velocityLerp;
+        p.velY += (desiredVelY - p.velY) * velocityLerp;
+
+        let newX = p.texcoordX + p.velX * safeDt;
+        let newY = p.texcoordY + p.velY * safeDt;
+        const minPos = AUTO_POINTER_BOUNDARY_MARGIN;
+        const maxPos = 1.0 - AUTO_POINTER_BOUNDARY_MARGIN;
+
+        if (newX < minPos) {
+            newX = minPos;
+            p.velX = Math.abs(p.velX);
+        } else if (newX > maxPos) {
+            newX = maxPos;
+            p.velX = -Math.abs(p.velX);
+        }
+
+        if (newY < minPos) {
+            newY = minPos;
+            p.velY = Math.abs(p.velY);
+        } else if (newY > maxPos) {
+            newY = maxPos;
+            p.velY = -Math.abs(p.velY);
+        }
+
+        p.prevTexcoordX = p.texcoordX;
+        p.prevTexcoordY = p.texcoordY;
+        p.texcoordX = newX;
+        p.texcoordY = newY;
+        p.deltaX = correctDeltaX(newX - p.prevTexcoordX);
+        p.deltaY = correctDeltaY(newY - p.prevTexcoordY);
+
+        if (Math.abs(p.deltaX) > AUTO_POINTER_MIN_DELTA_THRESHOLD || Math.abs(p.deltaY) > AUTO_POINTER_MIN_DELTA_THRESHOLD)
+            splatPointer(p);
     });
 }
 
