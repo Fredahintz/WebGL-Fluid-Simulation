@@ -1186,6 +1186,9 @@ const AUTO_POINTER_BASE_MAX_VELOCITY = 0.45;
 const AUTO_POINTER_TARGET_INTERVAL_MIN = 0.4;
 const AUTO_POINTER_TARGET_INTERVAL_MAX = 1.2;
 const AUTO_POINTER_VELOCITY_SMOOTHNESS = 4.0;
+const AUTO_POINTER_MAX_DT = 0.0333;
+const AUTO_POINTER_MIN_SPEED_RATIO = 0.3;
+const AUTO_POINTER_MAX_SPEED_RATIO = 1.0;
 
 function initAutoPointers () {
     autoPointers = [];
@@ -1270,14 +1273,15 @@ function applyInputs () {
 
 function updateAutoPointer (dt) {
     if (!config.AUTO_POINTER) return;
-    const safeDt = Math.max(0.0, Math.min(dt, 0.0333));
+    const safeDt = Math.max(0.0, Math.min(dt, AUTO_POINTER_MAX_DT));
 
     autoPointers.forEach(p => {
         p.targetVelTimer -= safeDt;
 
         if (p.targetVelTimer <= 0) {
             const angle = Math.random() * Math.PI * 2;
-            const speed = AUTO_POINTER_BASE_MAX_VELOCITY * (0.3 + Math.random() * 0.7);
+            const speedRatio = AUTO_POINTER_MIN_SPEED_RATIO + Math.random() * (AUTO_POINTER_MAX_SPEED_RATIO - AUTO_POINTER_MIN_SPEED_RATIO);
+            const speed = AUTO_POINTER_BASE_MAX_VELOCITY * speedRatio;
             p.targetVelX = Math.cos(angle) * speed;
             p.targetVelY = Math.sin(angle) * speed;
             p.targetVelTimer = AUTO_POINTER_TARGET_INTERVAL_MIN + Math.random() * (AUTO_POINTER_TARGET_INTERVAL_MAX - AUTO_POINTER_TARGET_INTERVAL_MIN);
