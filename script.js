@@ -1191,6 +1191,7 @@ const AUTO_POINTER_MIN_SPEED_RATIO = 0.3;
 const AUTO_POINTER_MAX_SPEED_RATIO = 1.0;
 const AUTO_POINTER_SPEED_RANGE = AUTO_POINTER_MAX_SPEED_RATIO - AUTO_POINTER_MIN_SPEED_RATIO;
 const AUTO_POINTER_TARGET_INTERVAL_RANGE = AUTO_POINTER_TARGET_INTERVAL_MAX - AUTO_POINTER_TARGET_INTERVAL_MIN;
+const AUTO_POINTER_MIN_DELTA_THRESHOLD = 0.0001;
 
 function initAutoPointers () {
     autoPointers = [];
@@ -1275,7 +1276,7 @@ function applyInputs () {
 
 function updateAutoPointer (dt) {
     if (!config.AUTO_POINTER) return;
-    const safeDt = Math.max(0.0, Math.min(dt, AUTO_POINTER_MAX_DT));
+    const safeDt = Math.min(dt, AUTO_POINTER_MAX_DT);
 
     autoPointers.forEach(p => {
         p.targetVelTimer -= safeDt;
@@ -1324,7 +1325,7 @@ function updateAutoPointer (dt) {
         p.deltaX = correctDeltaX(newX - p.prevTexcoordX);
         p.deltaY = correctDeltaY(newY - p.prevTexcoordY);
 
-        if (Math.abs(p.deltaX) > 0.0001 || Math.abs(p.deltaY) > 0.0001)
+        if (Math.abs(p.deltaX) > AUTO_POINTER_MIN_DELTA_THRESHOLD || Math.abs(p.deltaY) > AUTO_POINTER_MIN_DELTA_THRESHOLD)
             splatPointer(p);
     });
 }
