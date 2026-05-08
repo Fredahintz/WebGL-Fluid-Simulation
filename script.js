@@ -1270,9 +1270,10 @@ function applyInputs () {
 
 function updateAutoPointer (dt) {
     if (!config.AUTO_POINTER) return;
+    const safeDt = Math.max(0.0, Math.min(dt, 0.0333));
 
     autoPointers.forEach(p => {
-        p.targetVelTimer -= dt;
+        p.targetVelTimer -= safeDt;
 
         if (p.targetVelTimer <= 0) {
             const angle = Math.random() * Math.PI * 2;
@@ -1283,35 +1284,31 @@ function updateAutoPointer (dt) {
             p.color = generateColor();
         }
 
-        const velocityLerp = 1.0 - Math.exp(-AUTO_POINTER_VELOCITY_SMOOTHNESS * dt);
+        const velocityLerp = 1.0 - Math.exp(-AUTO_POINTER_VELOCITY_SMOOTHNESS * safeDt);
         const desiredVelX = p.targetVelX * config.AUTO_POINTER_SPEED;
         const desiredVelY = p.targetVelY * config.AUTO_POINTER_SPEED;
         p.velX += (desiredVelX - p.velX) * velocityLerp;
         p.velY += (desiredVelY - p.velY) * velocityLerp;
 
-        let newX = p.texcoordX + p.velX * dt;
-        let newY = p.texcoordY + p.velY * dt;
+        let newX = p.texcoordX + p.velX * safeDt;
+        let newY = p.texcoordY + p.velY * safeDt;
         const minPos = AUTO_POINTER_BOUNDARY_MARGIN;
         const maxPos = 1.0 - AUTO_POINTER_BOUNDARY_MARGIN;
 
         if (newX < minPos) {
-            newX = minPos + (minPos - newX);
+            newX = minPos;
             p.velX = Math.abs(p.velX);
-            p.targetVelTimer = 0;
         } else if (newX > maxPos) {
-            newX = maxPos - (newX - maxPos);
+            newX = maxPos;
             p.velX = -Math.abs(p.velX);
-            p.targetVelTimer = 0;
         }
 
         if (newY < minPos) {
-            newY = minPos + (minPos - newY);
+            newY = minPos;
             p.velY = Math.abs(p.velY);
-            p.targetVelTimer = 0;
         } else if (newY > maxPos) {
-            newY = maxPos - (newY - maxPos);
+            newY = maxPos;
             p.velY = -Math.abs(p.velY);
-            p.targetVelTimer = 0;
         }
 
         p.prevTexcoordX = p.texcoordX;
